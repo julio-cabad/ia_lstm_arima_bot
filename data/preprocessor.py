@@ -4,6 +4,7 @@ from typing import Dict, Tuple
 from utils.logger import setup_logger
 from indicators.indicators import Indicators
 from sklearn.preprocessing import MinMaxScaler
+from scipy import stats
 
 class DataPreprocessor:
     def __init__(self):
@@ -12,16 +13,32 @@ class DataPreprocessor:
     def prepare_data_for_arima(self, df: pd.DataFrame) -> Dict[str, np.ndarray]:
         try:
             data = df.copy()
-            indicators = Indicators(data)
-            data = indicators.add_all_indicators()
             
-            data['returns'] = np.log(data['close'] / data['close'].shift(1)) * 100
-            data = data.dropna(subset=['returns'])
+            # Calcular retornos logarítmicos
+            data['returns'] = np.log(data['close']).diff() * 100
+            
+            # Eliminar NaN antes de calcular z-scores
+            data = data.dropna()
+            
+            # Eliminar outliers usando máscara
+            z_scores = np.abs(stats.zscore(data['returns']))
+            data = data[z_scores < 3]
+            
+            # Características adicionales
+            data['volatility'] = data['close'].pct_change().rolling(20).std()
+            data['momentum'] = data['close'].pct_change(5).rolling(5).mean()
+            data['trend'] = data['close'].rolling(50).mean().pct_change()
+            
+            # Eliminar valores nulos finales
+            data = data.dropna()
             
             return {
                 'returns': data['returns'].values,
                 'dates': data.index,
-                'close': data['close'].values
+                'close': data['close'].values,
+                'volatility': data['volatility'].values,
+                'momentum': data['momentum'].values,
+                'trend': data['trend'].values
             }
         except Exception as e:
             self.logger.error(f"Error en preprocesamiento: {str(e)}")

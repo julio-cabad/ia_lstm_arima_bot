@@ -30,27 +30,31 @@ class TestArima:
             rmse = np.sqrt(mse)
             mae = mean_absolute_error(results['Real'], results['Predicción'])
             
-            # Métricas direccionales
-            correct_direction = np.mean(np.sign(results['Real']) == np.sign(results['Predicción']))
+            # Métricas direccionales mejoradas
+            correct_direction = np.mean(
+                (results['Real'] * results['Predicción']) > 0
+            )
             
-            # Métricas de error en eventos extremos
-            extreme_mask = np.abs(results['Real']) > np.std(results['Real'])
-            extreme_rmse = np.sqrt(mean_squared_error(
-                results.loc[extreme_mask, 'Real'],
-                results.loc[extreme_mask, 'Predicción']
-            ))
+            # Métricas de trading
+            results['Signal'] = np.sign(results['Predicción'])
+            results['Return'] = results['Real'] * results['Signal'].shift(1)
+            
+            win_rate = len(results[results['Return'] > 0]) / len(results[results['Return'] != 0])
+            sharpe = np.sqrt(252) * results['Return'].mean() / results['Return'].std()
             
             print("\n=== Evaluación Detallada ===")
             print(f"RMSE: {rmse:.4f}")
             print(f"MAE: {mae:.4f}")
             print(f"Dirección Correcta: {correct_direction:.2%}")
-            print(f"RMSE en eventos extremos: {extreme_rmse:.4f}")
+            print(f"Win Rate: {win_rate:.2%}")
+            print(f"Sharpe Ratio: {sharpe:.4f}")
             
             return {
                 'rmse': rmse,
                 'mae': mae,
                 'correct_direction': correct_direction,
-                'extreme_rmse': extreme_rmse
+                'win_rate': win_rate,
+                'sharpe': sharpe
             }
             
         except Exception as e:
@@ -108,6 +112,9 @@ class TestArima:
                 self.logger.error("No se pudieron obtener datos para las pruebas")
                 return
             
+            # Limitar a los últimos 2000 registros como hicimos con LSTM
+            df = df.tail(2000)  # Usar solo los datos más recientes
+            
             # Preparar datos
             print("\nPreparando datos...")
             arima_data = self.preprocessor.prepare_data_for_arima(df)
@@ -125,7 +132,7 @@ class TestArima:
             }
             
             # Verificar datos antes de entrenar
-            min_samples = 50  # Reducir el mínimo de muestras requeridas
+            min_samples = 100
             if len(train_data['returns']) < min_samples:
                 raise ValueError(f"Insuficientes datos para entrenamiento. Se necesitan al menos {min_samples} registros")
 
@@ -134,7 +141,7 @@ class TestArima:
             
             # Entrenar modelo
             print("\nEntrenando modelo ARIMA...")
-            arima = ArimaPredictor()  # Usará los órdenes predefinidos
+            arima = ArimaPredictor()
             arima.train(train_data)
             
             # Realizar predicciones
@@ -166,7 +173,6 @@ class TestArima:
             
         except Exception as e:
             self.logger.error(f"Error en prueba ARIMA: {str(e)}")
-            import traceback
             print(traceback.format_exc())
 
     def evaluate_trading_performance(self, results: pd.DataFrame):
@@ -209,36 +215,6 @@ class TestArima:
         except Exception as e:
             self.logger.error(f"Error en evaluación de trading: {str(e)}")
             raise
-
-    def test_lstm_prediction(self):
-        try:
-            # Obtener y preparar datos
-            symbol = "BTCUSDT"
-            timeframe = "4h"
-            df = self.collector.get_historical_data(symbol, timeframe)
-            X, y, scaler = self.preprocessor.prepare_data_for_lstm(df)
-
-            # Inicializar y entrenar LSTM
-            lstm = LSTMPredictor((X.shape[1], X.shape[2]))
-            lstm.train(X, y)
-
-            # Realizar predicciones
-            predictions = lstm.predict(X)
-            predictions = scaler.inverse_transform(predictions)
-
-            # Visualizar resultados
-            plt.figure(figsize=(14,5))
-            plt.plot(df['close'].values, color='blue', label='Real')
-            plt.plot(range(len(y), len(y) + len(predictions)), predictions, color='red', label='Predicción')
-            plt.title('Predicción LSTM')
-            plt.xlabel('Tiempo')
-            plt.ylabel('Precio')
-            plt.legend()
-            plt.show()
-        
-        except Exception as e:
-            self.logger.error(f"Error en prueba LSTM: {str(e)}")
-            print(traceback.format_exc())
 
 def main():
     print("Iniciando pruebas de ARIMA...")
