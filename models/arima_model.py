@@ -9,7 +9,7 @@ from statsmodels.tsa.statespace.sarimax import SARIMAX
 class ArimaPredictor:
     def __init__(self):
         self.logger = setup_logger("ArimaPredictor")
-        # Configuración óptima basada en mejores resultados
+        # Esta es la única configuración que usamos
         self.order = (1, 1, 1)
         self.seasonal_order = (1, 1, 1, 12)
         self.enforce_invertibility = True
@@ -25,7 +25,7 @@ class ArimaPredictor:
         }
         self.model = None
 
-    def train(self, data: Dict[str, np.ndarray]) -> None:
+    def train(self, data: Dict[str, np.ndarray], silent: bool = False) -> None:
         try:
             returns = data['returns']
             self.model = SARIMAX(
@@ -36,10 +36,11 @@ class ArimaPredictor:
                 concentrate_scale=self.concentrate_scale
             )
             self.fitted_model = self.model.fit(
-                disp=False,
+                disp=not silent,
                 **self.optimization_params
             )
-            self.logger.info("Modelo ARIMA entrenado exitosamente")
+            if not silent:
+                self.logger.info("Modelo ARIMA entrenado exitosamente")
         except Exception as e:
             self.logger.error(f"Error en entrenamiento: {str(e)}")
             raise

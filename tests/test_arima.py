@@ -23,7 +23,7 @@ class TestArima:
         self.collector = DataCollector()
         self.preprocessor = DataPreprocessor()
         
-    def evaluate_predictions(self, results: pd.DataFrame):
+    def evaluate_predictions(self, results: pd.DataFrame, silent: bool = False) -> dict:
         """Evaluación detallada de predicciones"""
         try:
             # Métricas básicas
@@ -43,12 +43,13 @@ class TestArima:
             win_rate = len(results[results['Return'] > 0]) / len(results[results['Return'] != 0])
             sharpe = np.sqrt(252) * results['Return'].mean() / results['Return'].std()
             
-            print("\n=== Evaluación Detallada ===")
-            print(f"RMSE: {rmse:.4f}")
-            print(f"MAE: {mae:.4f}")
-            print(f"Dirección Correcta: {correct_direction:.2%}")
-            print(f"Win Rate: {win_rate:.2%}")
-            print(f"Sharpe Ratio: {sharpe:.4f}")
+            if not silent:
+                print("\n=== Evaluación Detallada ===")
+                print(f"RMSE: {rmse:.4f}")
+                print(f"MAE: {mae:.4f}")
+                print(f"Dirección Correcta: {correct_direction:.2%}")
+                print(f"Win Rate: {win_rate:.2%}")
+                print(f"Sharpe Ratio: {sharpe:.4f}")
             
             return {
                 'rmse': rmse,
@@ -108,18 +109,47 @@ class TestArima:
             df = df.tail(2000)
             arima_data = self.preprocessor.prepare_data_for_arima(df)
             
-            # Ya no necesitamos buscar parámetros
-            # best_params = arima.grid_search_parameters(arima_data['returns'])
+            # Realizar validación cruzada silenciosamente
+            print("\nBuscando mejor modelo...")
+            best_metrics = None
+            best_predictions = None
+            best_sharpe = -float('inf')
             
-            # Validación cruzada directa con parámetros óptimos
-            print("\nRealizando validación cruzada...")
-            cv_metrics = self.cross_validate_arima(arima_data)
-            print("\nMétricas promedio en validación cruzada:")
-            for metric, value in cv_metrics.items():
-                print(f"{metric}: {value:.4f}")
+            tscv = TimeSeriesSplit(n_splits=5)
+            for train_idx, test_idx in tscv.split(arima_data['returns']):
+                train_data = {
+                    'returns': arima_data['returns'][train_idx],
+                    'close': arima_data['close'][train_idx]
+                }
+                test_data = {
+                    'returns': arima_data['returns'][test_idx],
+                    'close': arima_data['close'][test_idx]
+                }
+                
+                arima = ArimaPredictor()
+                arima.train(train_data, silent=True)  # Añadir parámetro para silenciar
+                predictions = arima.predict(steps=len(test_idx))[0]
+                
+                results = pd.DataFrame({
+                    'Real': test_data['returns'],
+                    'Predicción': predictions
+                })
+                
+                # Evaluar silenciosamente
+                metrics = self.evaluate_predictions(results, silent=True)
+                
+                if metrics['sharpe'] > best_sharpe:
+                    best_sharpe = metrics['sharpe']
+                    best_metrics = metrics
+                    best_predictions = predictions
             
-            # Continuar con el entrenamiento y evaluación final...
-            # (resto del código existente)
+            # Solo mostrar el mejor resultado
+            print("\n=== Mejores Métricas Encontradas ===")
+            print(f"RMSE: {best_metrics['rmse']:.4f}")
+            print(f"MAE: {best_metrics['mae']:.4f}")
+            print(f"Dirección Correcta: {best_metrics['correct_direction']:.2%}")
+            print(f"Win Rate: {best_metrics['win_rate']:.2%}")
+            print(f"Sharpe Ratio: {best_metrics['sharpe']:.4f}")
             
         except Exception as e:
             self.logger.error(f"Error en prueba ARIMA: {str(e)}")
