@@ -81,39 +81,25 @@ class DataPreprocessor:
 
     def prepare_data_for_lstm(self, df: pd.DataFrame, look_back: int = 60) -> Tuple[np.ndarray, np.ndarray, MinMaxScaler]:
         try:
-            # Agregar más características relevantes
-            feature_data = df[['close', 'high', 'low', 'volume']].copy()
-            
-            # Calcular retornos y volatilidad
-            feature_data['returns'] = np.log(feature_data['close'] / feature_data['close'].shift(1))
-            feature_data['volatility'] = feature_data['returns'].rolling(window=20).std()
-            
-            # Indicadores técnicos más relevantes
-            feature_data['MA_20'] = feature_data['close'].rolling(window=20).mean()
-            feature_data['RSI'] = self.calculate_rsi(feature_data['close'])
-            feature_data['BB_upper'], feature_data['BB_lower'] = self.calculate_bollinger_bands(feature_data['close'])
-            
-            # Manejar valores nulos
-            feature_data = feature_data.dropna()  # Eliminar filas con NaN en lugar de rellenarlas
+            # Usar solo el precio de cierre
+            feature_data = df[['close']].copy()
             
             # Normalizar datos
-            scaler = MinMaxScaler(feature_range=(-1, 1))  # Cambiar rango de normalización
+            scaler = MinMaxScaler(feature_range=(0, 1))
             scaled_data = scaler.fit_transform(feature_data)
             
             # Crear secuencias
             X, y = [], []
             for i in range(look_back, len(scaled_data)):
                 X.append(scaled_data[i-look_back:i])
-                y.append(scaled_data[i, 0])  # Predecir solo el precio de cierre
+                y.append(scaled_data[i, 0])
             
             X, y = np.array(X), np.array(y)
             
             # Asegurar la forma correcta para LSTM
-            n_features = scaled_data.shape[1]  # Número de características
-            X = np.reshape(X, (X.shape[0], look_back, n_features))
+            X = np.reshape(X, (X.shape[0], look_back, 1))
             
             # Logging para debugging
-            self.logger.info(f"Número de características: {n_features}")
             self.logger.info(f"Shape de X: {X.shape}")
             self.logger.info(f"Shape de y: {y.shape}")
             

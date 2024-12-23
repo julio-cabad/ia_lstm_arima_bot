@@ -40,9 +40,12 @@ class TestLSTM:
                 self.logger.error("No se pudieron obtener datos para las pruebas")
                 return
             
+            # Limitar a los últimos N registros más recientes
+            df = df.tail(2000)  # Usar solo los últimos 2000 registros
+            
             # Preparar datos
             print("\nPreparando datos...")
-            X, y, scaler = self.preprocessor.prepare_data_for_lstm(df)
+            X, y, scaler = self.preprocessor.prepare_data_for_lstm(df, look_back=30)
             print(f"Datos después de preprocesamiento: {len(X)} registros")
             
             # Dividir datos en entrenamiento y prueba
@@ -60,7 +63,7 @@ class TestLSTM:
             
             # Entrenar modelo
             print("\nEntrenando modelo LSTM...")
-            lstm.train(X_train, y_train, epochs=50)
+            lstm.train(X_train, y_train, epochs=100, batch_size=32)
             
             # Realizar predicciones
             print("\nRealizando predicciones...")

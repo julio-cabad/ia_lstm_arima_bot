@@ -12,28 +12,20 @@ class LSTMPredictor:
         self.logger.info(f"Construyendo modelo LSTM con input_shape: {input_shape}")
         
         model = tf.keras.Sequential([
-            tf.keras.layers.LSTM(64, return_sequences=True, input_shape=input_shape),
-            tf.keras.layers.BatchNormalization(),
-            tf.keras.layers.Dropout(0.2),
-            
-            tf.keras.layers.LSTM(32, return_sequences=False),
-            tf.keras.layers.BatchNormalization(),
-            tf.keras.layers.Dropout(0.2),
-            
-            tf.keras.layers.Dense(16, activation='relu'),
+            tf.keras.layers.LSTM(50, return_sequences=True, input_shape=input_shape),
+            tf.keras.layers.LSTM(50, return_sequences=False),
             tf.keras.layers.Dense(1)
         ])
         
         model.compile(
             optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-            loss='huber',
-            metrics=['mae']
+            loss='mse'
         )
         
         model.summary()
         return model
 
-    def train(self, X_train: np.ndarray, y_train: np.ndarray, epochs: int = 50, batch_size: int = 16):
+    def train(self, X_train: np.ndarray, y_train: np.ndarray, epochs: int = 100, batch_size: int = 32):
         self.logger.info("Entrenando modelo LSTM...")
         self.model.fit(
             X_train, 
