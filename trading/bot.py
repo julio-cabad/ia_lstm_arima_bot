@@ -7,6 +7,7 @@ from bnc.binance import RobotBinance
 from data.collector import DataCollector
 from data.preprocessor import DataPreprocessor
 from models.lstm_model import LSTMPredictor
+from models.arima_model import ArimaPredictor
 
 class IAAgentBot:
     def __init__(self, timeframe: str):
@@ -17,6 +18,7 @@ class IAAgentBot:
         self.data_collector = DataCollector()
         self.preprocessor = DataPreprocessor()
         self.lstm_predictor = None
+        self.arima_predictor = None
         self.initialize_clients()
     
     def initialize_clients(self):
@@ -41,6 +43,9 @@ class IAAgentBot:
 
     def initialize_lstm(self, input_shape: Tuple[int, int]):
         self.lstm_predictor = LSTMPredictor(input_shape)
+
+    def initialize_arima(self):
+        self.arima_predictor = ArimaPredictor()
 
     def analyze_market(self, symbol: str) -> Dict:
         """Analiza el mercado usando ARIMA y LSTM"""
@@ -73,6 +78,17 @@ class IAAgentBot:
         """Combina las predicciones de ARIMA y LSTM"""
         # Implementar lógica de combinación
         pass
+
+    def get_signal(self, data):
+        lstm_signal = self.lstm_predictor.predict(data)
+        arima_signal = self.arima_predictor.predict(data)
+        
+        # Tomar decisión basada en ambos modelos
+        if lstm_signal > 0 and arima_signal > 0:
+            return "BUY"
+        elif lstm_signal < 0 and arima_signal < 0:
+            return "SELL"
+        return "HOLD"
 
     def run(self):
         """Ejecuta el bot de trading"""

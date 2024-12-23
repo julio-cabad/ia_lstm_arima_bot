@@ -108,17 +108,10 @@ class TestArima:
             df = df.tail(2000)
             arima_data = self.preprocessor.prepare_data_for_arima(df)
             
-            # Buscar mejores parámetros
-            print("\nBuscando mejores parámetros...")
-            arima = ArimaPredictor()
-            best_params = arima.grid_search_parameters(arima_data['returns'])
-            print(f"Mejores parámetros encontrados: {best_params}")
+            # Ya no necesitamos buscar parámetros
+            # best_params = arima.grid_search_parameters(arima_data['returns'])
             
-            # Actualizar modelo con mejores parámetros
-            arima.order = best_params[0]
-            arima.seasonal_order = best_params[1]
-            
-            # Validación cruzada
+            # Validación cruzada directa con parámetros óptimos
             print("\nRealizando validación cruzada...")
             cv_metrics = self.cross_validate_arima(arima_data)
             print("\nMétricas promedio en validación cruzada:")
