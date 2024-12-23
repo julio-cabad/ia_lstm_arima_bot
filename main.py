@@ -1,6 +1,7 @@
 from trading.bot import IAAgentBot
 from utils.logger import setup_logger
 
+
 def main():
     """Punto de entrada principal del bot"""
     print("Starting TrendMagic Bot")

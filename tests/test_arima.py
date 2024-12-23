@@ -13,6 +13,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data.collector import DataCollector
 from data.preprocessor import DataPreprocessor
 from models.arima_model import ArimaPredictor
+from models.lstm_model import LSTMPredictor
 from utils.logger import setup_logger
 
 class TestArima:
@@ -208,6 +209,36 @@ class TestArima:
         except Exception as e:
             self.logger.error(f"Error en evaluación de trading: {str(e)}")
             raise
+
+    def test_lstm_prediction(self):
+        try:
+            # Obtener y preparar datos
+            symbol = "BTCUSDT"
+            timeframe = "4h"
+            df = self.collector.get_historical_data(symbol, timeframe)
+            X, y, scaler = self.preprocessor.prepare_data_for_lstm(df)
+
+            # Inicializar y entrenar LSTM
+            lstm = LSTMPredictor((X.shape[1], X.shape[2]))
+            lstm.train(X, y)
+
+            # Realizar predicciones
+            predictions = lstm.predict(X)
+            predictions = scaler.inverse_transform(predictions)
+
+            # Visualizar resultados
+            plt.figure(figsize=(14,5))
+            plt.plot(df['close'].values, color='blue', label='Real')
+            plt.plot(range(len(y), len(y) + len(predictions)), predictions, color='red', label='Predicción')
+            plt.title('Predicción LSTM')
+            plt.xlabel('Tiempo')
+            plt.ylabel('Precio')
+            plt.legend()
+            plt.show()
+        
+        except Exception as e:
+            self.logger.error(f"Error en prueba LSTM: {str(e)}")
+            print(traceback.format_exc())
 
 def main():
     print("Iniciando pruebas de ARIMA...")

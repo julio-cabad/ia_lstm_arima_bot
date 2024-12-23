@@ -1,13 +1,12 @@
 import time
-from typing import Dict, List
+from typing import Dict, List, Tuple
 from datetime import datetime
 from config.setting import CRYPTOCURRENCY_LIST
 from utils.logger import setup_logger
 from bnc.binance import RobotBinance
 from data.collector import DataCollector
-# from data.preprocessor import DataPreprocessor
-# from trading.models.arima_model import ArimaPredictor
-# from trading.models.lstm_model import LSTMPredictor
+from data.preprocessor import DataPreprocessor
+from models.lstm_model import LSTMPredictor
 
 class IAAgentBot:
     def __init__(self, timeframe: str):
@@ -16,9 +15,8 @@ class IAAgentBot:
         self.symbols = CRYPTOCURRENCY_LIST
         self.clients: Dict[str, RobotBinance] = {}
         self.data_collector = DataCollector()
-        # self.preprocessor = DataPreprocessor()
-        # self.arima_predictor = ArimaPredictor()
-        # self.lstm_predictor = LSTMPredictor()
+        self.preprocessor = DataPreprocessor()
+        self.lstm_predictor = None
         self.initialize_clients()
     
     def initialize_clients(self):
@@ -41,6 +39,9 @@ class IAAgentBot:
             except Exception as e:
                 self.logger.error(f"Failed to initialize client for {symbol}: {str(e)}")
 
+    def initialize_lstm(self, input_shape: Tuple[int, int]):
+        self.lstm_predictor = LSTMPredictor(input_shape)
+
     def analyze_market(self, symbol: str) -> Dict:
         """Analiza el mercado usando ARIMA y LSTM"""
         try:
@@ -50,20 +51,19 @@ class IAAgentBot:
                 self.timeframe
             )
             
-            # Preprocesar datos
-            processed_data = self.preprocessor.prepare_data(historical_data)
+            # Preprocesar datos para LSTM
+            X, y, scaler = self.preprocessor.prepare_data_for_lstm(historical_data)
             
-            # Obtener predicciones
-            arima_prediction = self.arima_predictor.predict(processed_data)
-            lstm_prediction = self.lstm_predictor.predict(processed_data)
+            # Inicializar y entrenar LSTM
+            if not self.lstm_predictor:
+                self.initialize_lstm((X.shape[1], 1))
+            self.lstm_predictor.train(X, y)
             
-            # Combinar predicciones
-            combined_prediction = self.combine_predictions(
-                arima_prediction, 
-                lstm_prediction
-            )
+            # Predecir con LSTM
+            lstm_prediction = self.lstm_predictor.predict(X[-1].reshape(1, X.shape[1], 1))
+            lstm_prediction = scaler.inverse_transform(lstm_prediction)
             
-            return combined_prediction
+            return lstm_prediction
             
         except Exception as e:
             self.logger.error(f"Error analyzing market for {symbol}: {str(e)}")
