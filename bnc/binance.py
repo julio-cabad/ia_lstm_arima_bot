@@ -86,16 +86,38 @@ class RobotBinance:
     def candlestick(self) -> pd.DataFrame:
         """Get candlestick data for the symbol."""
         try:
-            klines = self.client.klines(
-                symbol=self.symbol,
-                interval=self.temporality,
-                limit=1000
-            )
+            # Obtener múltiples lotes de datos históricos
+            all_klines = []
+            limit = 1000  # Máximo por petición
+            num_requests = 5  # Obtener 5000 velas en total
             
-            if not klines:
+            for i in range(num_requests):
+                if i == 0:
+                    klines = self.client.klines(
+                        symbol=self.symbol,
+                        interval=self.temporality,
+                        limit=limit
+                    )
+                else:
+                    # Usar el timestamp de la primera vela del lote anterior
+                    last_timestamp = klines[0][0]
+                    klines = self.client.klines(
+                        symbol=self.symbol,
+                        interval=self.temporality,
+                        endTime=last_timestamp - 1,
+                        limit=limit
+                    )
+                
+                if not klines:
+                    break
+                    
+                all_klines.extend(klines)
+                self.logger.info(f"Obtenidos {len(all_klines)} registros históricos")
+            
+            if not all_klines:
                 raise ValueError(f"No candlestick data received for {self.symbol}")
                 
-            df = pd.DataFrame(klines, columns=[
+            df = pd.DataFrame(all_klines, columns=[
                 'timestamp', 'open', 'high', 'low', 'close', 'volume',
                 'close_time', 'quote_asset_volume', 'number_of_trades',
                 'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
@@ -114,6 +136,11 @@ class RobotBinance:
             if len(df) < 2:
                 raise ValueError(f"Insufficient data for {self.symbol} after cleaning")
                 
+            # Convertir timestamp a índice
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            df.set_index('timestamp', inplace=True)
+            df = df.sort_index()  # Asegurar orden cronológico
+            
             return df
             
         except Exception as e:

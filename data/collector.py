@@ -26,7 +26,19 @@ class DataCollector:
             # Asegurar que el índice temporal sea correcto
             df.index = pd.to_datetime(df.index, unit='ms')
             
+            # Verificar cantidad de datos
+            expected_records = 5000  # 5000 velas históricas
+            if len(df) < expected_records * 0.9:  # 90% del objetivo
+                self.logger.warning(f"Obtenidos menos datos de los esperados: {len(df)} < {expected_records}")
+            
             self.logger.info(f"Successfully collected {len(df)} records for {symbol}")
+            
+            # Información adicional
+            print(f"\nPeríodo de datos:")
+            print(f"Desde: {df.index.min()}")
+            print(f"Hasta: {df.index.max()}")
+            print(f"Total registros: {len(df)}")
+            
             return df
             
         except Exception as e:

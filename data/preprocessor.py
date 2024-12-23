@@ -1,92 +1,79 @@
 import pandas as pd
 import numpy as np
-from typing import Tuple, Dict
-from sklearn.preprocessing import MinMaxScaler
+from typing import Dict
 from utils.logger import setup_logger
-from indicators.indicators import Indicators # Importamos la función que añade todos los indicadores
+from indicators.indicators import Indicators
 
 class DataPreprocessor:
     def __init__(self):
         self.logger = setup_logger("DataPreprocessor")
-        self.scalers: Dict[str, MinMaxScaler] = {}
         
-    def prepare_data(self, df: pd.DataFrame, sequence_length: int = 60) -> Tuple[Dict[str, np.ndarray], Dict[str, MinMaxScaler]]:
-        """
-        Prepara los datos para los modelos ARIMA y LSTM.
-        
-        Args:
-            df: DataFrame con datos históricos
-            sequence_length: Longitud de la secuencia para LSTM
-            
-        Returns:
-            Tuple con diccionarios conteniendo datos procesados y scalers
-        """
+    def prepare_data_for_arima(self, df: pd.DataFrame) -> Dict[str, np.ndarray]:
         try:
-            # Verificar datos
-            if df.empty:
-                raise ValueError("DataFrame está vacío")
-                
-            # Crear copia para no modificar los datos originales
             data = df.copy()
+            indicators = Indicators(data)
+            data = indicators.add_all_indicators()
             
-            # Asegurar que el índice está ordenado
-            data = data.sort_index()
+            data['returns'] = np.log(data['close'] / data['close'].shift(1)) * 100
+            data = data.dropna(subset=['returns'])
             
-            # Añadir indicadores técnicos
-            data = add_all_indicators(data)
-            
-            # Calcular retornos logarítmicos para ARIMA
-            data['returns'] = np.log(data['close'] / data['close'].shift(1))
-            data = data.dropna()
-            
-            # Preparar datos para ARIMA
-            arima_data = {
+            return {
                 'returns': data['returns'].values,
+                'dates': data.index,
                 'close': data['close'].values
             }
-            
-            # Preparar datos para LSTM
-            lstm_data = self._prepare_lstm_data(data, sequence_length)
-            
-            processed_data = {
-                'arima': arima_data,
-                'lstm': lstm_data
-            }
-            
-            return processed_data, self.scalers
-            
         except Exception as e:
-            self.logger.error(f"Error en el preprocesamiento de datos: {str(e)}")
+            self.logger.error(f"Error en preprocesamiento: {str(e)}")
             raise
-            
-    def _prepare_lstm_data(self, data: pd.DataFrame, sequence_length: int) -> Dict[str, np.ndarray]:
-        """
-        Prepara los datos específicamente para LSTM.
-        """
+
+    def validate_data_quality(self, data: pd.DataFrame) -> bool:
+        """Valida la calidad de los datos"""
         try:
-            # Seleccionar características para LSTM (incluir indicadores técnicos)
-            features = ['open', 'high', 'low', 'close', 'volume', 
-                       'RSX', 'EMA', 'BB_upper', 'BB_middle', 'BB_lower']  # Ajustar según tus indicadores
+            print("\n=== Validación de Calidad de Datos ===")
             
-            # Asegurarse de que todas las características existen
-            available_features = [f for f in features if f in data.columns]
+            # 1. Verificar suficientes datos
+            min_required = 100
+            print(f"\nDatos disponibles: {len(data)} (mínimo requerido: {min_required})")
+            if len(data) < min_required:
+                self.logger.warning(f"Insuficientes datos: {len(data)} < {min_required}")
+                return False
             
-            # Normalizar datos
-            self.scalers['lstm'] = MinMaxScaler(feature_range=(0, 1))
-            scaled_data = self.scalers['lstm'].fit_transform(data[available_features])
+            # 2. Verificar estacionariedad
+            from statsmodels.tsa.stattools import adfuller
+            adf_result = adfuller(data['returns'])
+            print(f"\nTest de Estacionariedad (ADF):")
+            print(f"p-value: {adf_result[1]:.4f}")
             
-            # Crear secuencias para LSTM
-            X, y = [], []
-            for i in range(len(scaled_data) - sequence_length):
-                X.append(scaled_data[i:(i + sequence_length)])
-                y.append(scaled_data[i + sequence_length, available_features.index('close')])
-                
-            return {
-                'X': np.array(X),
-                'y': np.array(y),
-                'features': available_features
-            }
+            if adf_result[1] > 0.05:
+                print("Los datos no son estacionarios, aplicando diferenciaci��n...")
+                data['returns'] = np.diff(data['returns'], prepend=data['returns'][0])
+                adf_result = adfuller(data['returns'])
+                print(f"p-value después de diferenciación: {adf_result[1]:.4f}")
+            
+            # 3. Verificar autocorrelación
+            from statsmodels.stats.diagnostic import acorr_ljungbox
+            lb_result = acorr_ljungbox(data['returns'], lags=[10])
+            print(f"\nTest de Autocorrelación (Ljung-Box):")
+            print(f"p-value: {lb_result['lb_pvalue'].iloc[0]:.4f}")
+            
+            if lb_result['lb_pvalue'].iloc[0] > 0.05:
+                print("Advertencia: Baja autocorrelación en los datos")
+            
+            # 4. Verificar volatilidad
+            from arch import arch_model
+            am = arch_model(data['returns'])
+            res = am.fit(disp='off')
+            arch_test = res.arch_lm_test()
+            print(f"\nTest de Volatilidad:")
+            try:
+                print(f"Test Statistic: {float(arch_test.stat):.4f}")
+                print(f"p-value: {float(arch_test.pvalue):.4f}")
+            except:
+                print(f"Test Statistic: {arch_test.stat}")
+            
+            return True
             
         except Exception as e:
-            self.logger.error(f"Error preparando datos para LSTM: {str(e)}")
-            raise
+            self.logger.error(f"Error validando datos: {str(e)}")
+            print(f"Error durante la validación: {str(e)}")
+            return True
