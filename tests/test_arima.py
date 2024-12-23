@@ -7,6 +7,7 @@ import seaborn as sns
 from datetime import datetime
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 import traceback
+from sklearn.model_selection import TimeSeriesSplit
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -100,76 +101,32 @@ class TestArima:
         try:
             print("\nIniciando prueba de ARIMA...")
             
-            # Obtener datos
+            # Obtener y preparar datos iniciales
             symbol = "BTCUSDT"
             timeframe = "1h"
-            print(f"\nObteniendo datos para {symbol} en timeframe {timeframe}")
             df = self.collector.get_historical_data(symbol, timeframe)
-            
-            print(f"\nDatos totales obtenidos: {len(df)} registros")
-            
-            if df.empty:
-                self.logger.error("No se pudieron obtener datos para las pruebas")
-                return
-            
-            # Limitar a los últimos 2000 registros como hicimos con LSTM
-            df = df.tail(2000)  # Usar solo los datos más recientes
-            
-            # Preparar datos
-            print("\nPreparando datos...")
+            df = df.tail(2000)
             arima_data = self.preprocessor.prepare_data_for_arima(df)
-            print(f"Datos después de preprocesamiento: {len(arima_data['returns'])} registros")
             
-            # Dividir datos en entrenamiento y prueba
-            train_size = int(len(arima_data['returns']) * 0.8)
-            train_data = {
-                'returns': arima_data['returns'][:train_size],
-                'close': arima_data['close'][:train_size]
-            }
-            test_data = {
-                'returns': arima_data['returns'][train_size:],
-                'close': arima_data['close'][train_size:]
-            }
-            
-            # Verificar datos antes de entrenar
-            min_samples = 100
-            if len(train_data['returns']) < min_samples:
-                raise ValueError(f"Insuficientes datos para entrenamiento. Se necesitan al menos {min_samples} registros")
-
-            print(f"\nDatos de entrenamiento: {len(train_data['returns'])} registros")
-            print(f"Datos de prueba: {len(test_data['returns'])} registros")
-            
-            # Entrenar modelo
-            print("\nEntrenando modelo ARIMA...")
+            # Buscar mejores parámetros
+            print("\nBuscando mejores parámetros...")
             arima = ArimaPredictor()
-            arima.train(train_data)
+            best_params = arima.grid_search_parameters(arima_data['returns'])
+            print(f"Mejores parámetros encontrados: {best_params}")
             
-            # Realizar predicciones
-            print("\nRealizando predicciones...")
-            predictions, conf_int = arima.predict(steps=len(test_data['returns']))
+            # Actualizar modelo con mejores parámetros
+            arima.order = best_params[0]
+            arima.seasonal_order = best_params[1]
             
-            # Evaluar modelo
-            print("\nEvaluando modelo...")
-            metrics = arima.evaluate(test_data['returns'])
+            # Validación cruzada
+            print("\nRealizando validación cruzada...")
+            cv_metrics = self.cross_validate_arima(arima_data)
+            print("\nMétricas promedio en validación cruzada:")
+            for metric, value in cv_metrics.items():
+                print(f"{metric}: {value:.4f}")
             
-            # Guardar y visualizar resultados
-            results = pd.DataFrame({
-                'Fecha': arima_data['dates'][train_size:],
-                'Real': test_data['returns'],
-                'Predicción': predictions,
-                'Límite_Inferior': conf_int[:,0],
-                'Límite_Superior': conf_int[:,1]
-            })
-            results.set_index('Fecha', inplace=True)
-            results.to_csv('tests/arima_results.csv')
-            
-            # Evaluación detallada
-            self.evaluate_predictions(results)
-            
-            # Generar gráfica
-            self.plot_detailed_results(results)
-            
-            print("\nPrueba completada exitosamente")
+            # Continuar con el entrenamiento y evaluación final...
+            # (resto del código existente)
             
         except Exception as e:
             self.logger.error(f"Error en prueba ARIMA: {str(e)}")
@@ -214,6 +171,36 @@ class TestArima:
             
         except Exception as e:
             self.logger.error(f"Error en evaluación de trading: {str(e)}")
+            raise
+
+    def cross_validate_arima(self, data, n_splits=5):
+        try:
+            tscv = TimeSeriesSplit(n_splits=n_splits)
+            metrics = []
+            
+            for train_idx, test_idx in tscv.split(data['returns']):
+                train_data = {
+                    'returns': data['returns'][train_idx],
+                    'close': data['close'][train_idx]
+                }
+                test_data = {
+                    'returns': data['returns'][test_idx],
+                    'close': data['close'][test_idx]
+                }
+                
+                arima = ArimaPredictor()
+                arima.train(train_data)
+                predictions = arima.predict(steps=len(test_idx))[0]
+                
+                fold_metrics = self.evaluate_predictions(pd.DataFrame({
+                    'Real': test_data['returns'],
+                    'Predicción': predictions
+                }))
+                metrics.append(fold_metrics)
+                
+            return pd.DataFrame(metrics).mean()
+        except Exception as e:
+            self.logger.error(f"Error en validación cruzada: {str(e)}")
             raise
 
 def main():

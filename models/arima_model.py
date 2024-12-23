@@ -9,8 +9,18 @@ from statsmodels.tsa.statespace.sarimax import SARIMAX
 class ArimaPredictor:
     def __init__(self):
         self.logger = setup_logger("ArimaPredictor")
-        self.order = (1, 1, 1)
-        self.seasonal_order = (1, 1, 1, 12)
+        self.order = (2, 1, 1)
+        self.seasonal_order = (1, 1, 1, 24)
+        self.enforce_invertibility = True
+        self.concentrate_scale = True
+        
+        # Añadir parámetros de optimización
+        self.optimization_params = {
+            'method': 'lbfgs',
+            'maxiter': 500,  # Aumentar para mejor convergencia
+            'optim_score': 'harvey',  # Más robusto para series financieras
+            'optim_complex_step': True  # Mejor precisión numérica
+        }
         self.model = None
 
     def train(self, data: Dict[str, np.ndarray]) -> None:
@@ -20,7 +30,8 @@ class ArimaPredictor:
                 returns,
                 order=self.order,
                 seasonal_order=self.seasonal_order,
-                enforce_stationarity=False
+                enforce_invertibility=self.enforce_invertibility,
+                concentrate_scale=self.concentrate_scale
             )
             self.fitted_model = self.model.fit(
                 disp=False,
@@ -74,3 +85,26 @@ class ArimaPredictor:
         except Exception as e:
             self.logger.error(f"Error evaluando modelo: {str(e)}")
             raise 
+
+    def grid_search_parameters(self, data):
+        try:
+            orders = [(1,1,1), (2,1,1), (1,1,2)]
+            seasonal_orders = [(1,1,1,12), (1,1,1,24)]
+            best_aic = float('inf')
+            best_params = None
+            
+            for order in orders:
+                for seasonal_order in seasonal_orders:
+                    try:
+                        model = SARIMAX(data, order=order, seasonal_order=seasonal_order)
+                        fitted = model.fit(disp=False, maxiter=200)
+                        if fitted.aic < best_aic:
+                            best_aic = fitted.aic
+                            best_params = (order, seasonal_order)
+                    except:
+                        continue
+                        
+            return best_params
+        except Exception as e:
+            self.logger.error(f"Error en grid search: {str(e)}")
+            raise
