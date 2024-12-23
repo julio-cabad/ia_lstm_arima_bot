@@ -28,28 +28,21 @@ class TestLSTM:
         try:
             print("\nIniciando prueba de LSTM...")
             
-            # Obtener datos
+            # Obtener datos con timeframe más corto
             symbol = "BTCUSDT"
-            timeframe = "1h"
+            timeframe = "30m"  # Cambiado de "1h" a "30m"
             print(f"\nObteniendo datos para {symbol} en timeframe {timeframe}")
             df = self.collector.get_historical_data(symbol, timeframe)
             
-            print(f"\nDatos totales obtenidos: {len(df)} registros")
+            # Limitar a datos más recientes pero aumentar la cantidad por el nuevo timeframe
+            df = df.tail(4000)  # Duplicamos porque ahora tenemos el doble de registros por el timeframe
             
-            if df.empty:
-                self.logger.error("No se pudieron obtener datos para las pruebas")
-                return
-            
-            # Limitar a los últimos N registros más recientes
-            df = df.tail(2000)  # Usar solo los últimos 2000 registros
-            
-            # Preparar datos
+            # Preparar datos con ventana más corta
             print("\nPreparando datos...")
-            X, y, scaler = self.preprocessor.prepare_data_for_lstm(df, look_back=30)
-            print(f"Datos después de preprocesamiento: {len(X)} registros")
+            X, y, scaler = self.preprocessor.prepare_data_for_lstm(df, look_back=20)  # Reducido de 30 a 20
             
-            # Dividir datos en entrenamiento y prueba
-            train_size = int(len(X) * 0.8)
+            # Ajustar proporción de datos de entrenamiento
+            train_size = int(len(X) * 0.7)  # Cambiado de 0.8 a 0.7
             X_train, X_test = X[:train_size], X[train_size:]
             y_train, y_test = y[:train_size], y[train_size:]
             

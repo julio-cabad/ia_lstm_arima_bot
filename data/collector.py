@@ -7,19 +7,24 @@ class DataCollector:
     def __init__(self):
         self.logger = setup_logger("DataCollector")
         
-    def get_historical_data(self, symbol: str, timeframe: str, lookback_days: int = 30) -> pd.DataFrame:
+    def get_historical_data(self, symbol: str, timeframe: str, limit: int = 5000) -> pd.DataFrame:
         """
         Obtiene datos históricos de Binance para un símbolo específico.
         
         Args:
             symbol: Par de trading (ej: 'BTCUSDT')
-            timeframe: Intervalo de tiempo (ej: '1h', '4h', '1d')
-            lookback_days: Número de días hacia atrás para obtener datos
+            timeframe: Intervalo de tiempo (ej: '1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d')
+            limit: Número máximo de velas históricas a obtener
             
         Returns:
             DataFrame con los datos históricos
         """
         try:
+            # Validar timeframe
+            valid_timeframes = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d']
+            if timeframe not in valid_timeframes:
+                raise ValueError(f"Timeframe inválido. Debe ser uno de: {valid_timeframes}")
+            
             client = RobotBinance(pair=symbol, temporality=timeframe)
             df = client.candlestick()
             
@@ -27,9 +32,8 @@ class DataCollector:
             df.index = pd.to_datetime(df.index, unit='ms')
             
             # Verificar cantidad de datos
-            expected_records = 5000  # 5000 velas históricas
-            if len(df) < expected_records * 0.9:  # 90% del objetivo
-                self.logger.warning(f"Obtenidos menos datos de los esperados: {len(df)} < {expected_records}")
+            if len(df) < limit:  # 90% del objetivo
+                self.logger.warning(f"Obtenidos menos datos de los esperados: {len(df)} < {limit}")
             
             self.logger.info(f"Successfully collected {len(df)} records for {symbol}")
             

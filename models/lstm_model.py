@@ -18,14 +18,14 @@ class LSTMPredictor:
         ])
         
         model.compile(
-            optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
+            optimizer=tf.keras.optimizers.Adam(learning_rate=0.0005),
             loss='mse'
         )
         
         model.summary()
         return model
 
-    def train(self, X_train: np.ndarray, y_train: np.ndarray, epochs: int = 100, batch_size: int = 32):
+    def train(self, X_train: np.ndarray, y_train: np.ndarray, epochs: int = 150, batch_size: int = 32):
         self.logger.info("Entrenando modelo LSTM...")
         self.model.fit(
             X_train, 
