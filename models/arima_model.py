@@ -27,6 +27,9 @@ class ArimaPredictor:
 
     def train(self, data: Dict[str, np.ndarray], silent: bool = False) -> None:
         try:
+            import warnings
+            warnings.filterwarnings('ignore')  # Suprimir warnings
+            
             returns = data['returns']
             self.model = SARIMAX(
                 returns,
@@ -90,32 +93,31 @@ class ArimaPredictor:
 
     def grid_search_parameters(self, data):
         try:
-            # Expandir búsqueda alrededor de los parámetros exitosos
+            # Más combinaciones de parámetros
             orders = [
-                (1,1,1),  # Parámetro base exitoso
-                (2,1,1),  # Aumentar AR
-                (1,1,2),  # Aumentar MA
-                (2,1,2),  # Aumentar ambos
-                (1,2,1)   # Más diferenciación
+                (1,1,1),  # Base
+                (2,1,1),  # Más AR
+                (1,1,2),  # Más MA
+                (2,1,2),  # Ambos
+                (2,2,2),  # Más complejo
+                (3,1,2)   # Más AR largo plazo
             ]
             
             seasonal_orders = [
-                (1,1,1,12),  # Parámetro base exitoso
-                (1,1,1,24),  # Ciclo diario
+                (1,1,1,12),  # Base
                 (2,1,1,12),  # Más AR estacional
-                (1,1,2,12)   # Más MA estacional
+                (1,1,2,12),  # Más MA estacional
+                (2,1,2,12),  # Ambos estacional
+                (1,1,1,24)   # Ciclo más largo
             ]
             
-            # Modificar parámetros de optimización para suprimir salida
-            optimization_params = self.optimization_params.copy()
-            optimization_params.update({
-                'disp': False,
-                'warning_only': True,
-                'print_level': 0,
-                'maxiter': 300,  # Reducir iteraciones
-                'tol': 1e-3,    # Tolerancia más flexible
-                'optim_complex_step': False  # Desactivar para velocidad
-            })
+            # Mejorar optimización
+            optimization_params = {
+                'method': 'lbfgs',
+                'maxiter': 500,     # Más iteraciones
+                'tol': 1e-4,        # Más precisión
+                'disp': False
+            }
             
             best_aic = float('inf')
             best_params = None

@@ -96,46 +96,144 @@ class DataPreprocessor:
             print(f"Error durante la validación: {str(e)}")
             return True
 
-    def prepare_data_for_lstm(self, df: pd.DataFrame, look_back: int = 60) -> Tuple[np.ndarray, np.ndarray, MinMaxScaler]:
+    def prepare_data_for_lstm(self, df: pd.DataFrame, look_back: int = 30):
         try:
-            # Usar solo el precio de cierre
-            feature_data = df[['close']].copy()
+            # Instanciar Indicators
+            indicators = Indicators(df)
             
-            # Normalizar datos
+            # Calcular indicadores usando la clase existente
+            df['returns'] = df['close'].pct_change()
+            df['volatility'] = df['returns'].rolling(20).std()
+            
+            # RSI
+            df['rsi'] = indicators.rsi()
+            
+            # MACD
+            macd_data = indicators.macd()
+            df['macd'] = macd_data['MACD']
+            df['signal'] = macd_data['Signal']
+            df['macd_hist'] = macd_data['MACD_Hist']
+            
+            # Bollinger Bands
+            bb_data = indicators.bollinger_bands(20)
+            df['bb_upper'] = bb_data[0]
+            df['bb_middle'] = bb_data[1]
+            df['bb_lower'] = bb_data[2]
+            df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / df['bb_middle']
+            
+            # EMA Trend
+            tm_color, tm_value = indicators.trend_magic()
+            df['tm_value'] = tm_value
+            
+            # Codificación One-Hot para tm_color
+            df['tm_color_blue'] = np.where(tm_color == 'blue', 1, 0)
+            df['tm_color_red'] = np.where(tm_color == 'red', 1, 0)
+            
+            df['ema_slow'] = indicators.ema(21)
+            df['ema_fast'] = indicators.ema(8)
+            df['sma'] = indicators.sma(20)
+            
+            # Estrategia de cruce de medias móviles
+            df['signal_cruce'] = 0
+            df.loc[(df['ema_fast'].shift(1) < df['ema_slow'].shift(1)) & (df['ema_fast'] > df['ema_slow']), 'signal_cruce'] = 1
+            df.loc[(df['ema_fast'].shift(1) > df['ema_slow'].shift(1)) & (df['ema_fast'] < df['ema_slow']), 'signal_cruce'] = -1
+            
+            # Nueva estrategia basada en precio, EMA y SMA
+            df['signal_estrategia'] = 0
+            df.loc[(df['close'] > df['ema_slow']) & (df['close'] > df['sma']), 'signal_estrategia'] = 1  # Long
+            df.loc[(df['close'] < df['ema_slow']) & (df['close'] < df['sma']), 'signal_estrategia'] = -1 # Short
+            
+            # Nueva estrategia basada en precio y Magic Trend
+            df['signal_magic_trend'] = 0
+            df.loc[(df['close'] > df['tm_value']) & (df['tm_color_blue'] == 1), 'signal_magic_trend'] = 1  # Long
+            df.loc[(df['close'] < df['tm_value']) & (df['tm_color_red'] == 1), 'signal_magic_trend'] = -1 # Short
+            
+            # Nueva estrategia basada en Bollinger Bands, Magic Trend y cruce de tm_value
+            df['signal_bb_tm'] = 0
+            
+            # Calcular la distancia del tm_value a las bandas de Bollinger
+            df['dist_to_lower'] = (df['tm_value'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
+            df['dist_to_upper'] = (df['bb_upper'] - df['tm_value']) / (df['bb_upper'] - df['bb_lower'])
+            
+            # Señal Long
+            long_condition = (
+                (df['tm_color_blue'] == 1) &
+                (df['dist_to_lower'] < 0.3) &  # tm_value cerca de la banda inferior
+                (df['dist_to_upper'] > 0.7) &  # tm_value lejos de la banda superior
+                (df['tm_value'].shift(1) < df['bb_lower']) & (df['tm_value'] > df['bb_lower']) # Cruce de tm_value de abajo hacia arriba
+            )
+            
+            # Señal Short
+            short_condition = (
+                (df['tm_color_red'] == 1) &
+                (df['dist_to_upper'] < 0.3) &  # tm_value cerca de la banda superior
+                (df['dist_to_lower'] > 0.7) &  # tm_value lejos de la banda inferior
+                (df['tm_value'].shift(1) > df['bb_upper']) & (df['tm_value'] < df['bb_upper']) # Cruce de tm_value de arriba hacia abajo
+            )
+            
+            df.loc[long_condition, 'signal_bb_tm'] = 1
+            df.loc[short_condition, 'signal_bb_tm'] = -1
+            
+            # Nueva estrategia basada en el cruce del precio con tm_value, color y cercanía a la banda inferior
+            df['signal_cruce_tm'] = 0
+            
+            # Señal Long
+            long_cruce_condition = (
+                (df['tm_color_blue'] == 1) &
+                (df['dist_to_lower'] < 0.3) & # Precio cerca de la banda inferior
+                (df['close'].shift(1) < df['tm_value']) & (df['close'] > df['tm_value']) & (df['close'] > df['tm_value']) # Cruce de abajo hacia arriba y precio mayor
+            )
+            
+            # Señal Short
+            short_cruce_condition = (
+                (df['tm_color_red'] == 1) &
+                (df['dist_to_upper'] < 0.3) & # Precio cerca de la banda superior
+                (df['close'].shift(1) > df['tm_value']) & (df['close'] < df['tm_value']) & (df['close'] < df['tm_value']) # Cruce de arriba hacia abajo y precio menor
+            )
+            
+            df.loc[long_cruce_condition, 'signal_cruce_tm'] = 1
+            df.loc[short_cruce_condition, 'signal_cruce_tm'] = -1
+            
+            # Eliminar NaN
+            df = df.dropna()
+            
+            # Features para el modelo
+            features = np.column_stack((
+                df['returns'].values * 100, # Retornos * 100
+                df['signal_magic_trend'].values,
+                df['signal_bb_tm'].values,
+                df['signal_cruce_tm'].values,
+                df['tm_color_red'].values,
+                df['tm_color_blue'].values,
+                df['tm_value'].values,
+                df['signal_estrategia'].values,
+                df['signal_cruce'].values,
+                df['signal_cruce_tm'].values,
+                df['signal_bb_tm'].values,
+                df['macd_hist'].values,
+                df['bb_width'].values,
+                df['ema_slow'].values,
+                df['ema_fast'].values,
+                df['sma'].values
+            ))
+            
+            # Normalizar features
             scaler = MinMaxScaler(feature_range=(0, 1))
-            scaled_data = scaler.fit_transform(feature_data)
+            features_scaled = scaler.fit_transform(features)
+            
+            # Target: usar retornos futuros en lugar de dirección binaria
+            target = df['close'].pct_change().shift(-1).values[:-1] * 100 # Retornos * 100
             
             # Crear secuencias
             X, y = [], []
-            for i in range(look_back, len(scaled_data)):
-                X.append(scaled_data[i-look_back:i])
-                y.append(scaled_data[i, 0])
+            for i in range(look_back, len(features_scaled)-1):
+                X.append(features_scaled[i-look_back:i])
+                y.append(target[i])
             
-            X, y = np.array(X), np.array(y)
-            
-            # Asegurar la forma correcta para LSTM
-            X = np.reshape(X, (X.shape[0], look_back, 1))
-            
-            # Logging para debugging
-            self.logger.info(f"Shape de X: {X.shape}")
-            self.logger.info(f"Shape de y: {y.shape}")
-            
-            return X, y, scaler
+            return np.array(X), np.array(y), scaler
             
         except Exception as e:
             self.logger.error(f"Error en prepare_data_for_lstm: {str(e)}")
             raise
 
-    def calculate_rsi(self, prices, period=14):
-        delta = prices.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-        rs = gain / loss
-        return 100 - (100 / (1 + rs))
-
-    def calculate_bollinger_bands(self, prices, window=20, num_std=2):
-        ma = prices.rolling(window=window).mean()
-        std = prices.rolling(window=window).std()
-        upper = ma + (std * num_std)
-        lower = ma - (std * num_std)
-        return upper, lower
+   

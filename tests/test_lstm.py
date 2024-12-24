@@ -16,6 +16,7 @@ from data.collector import DataCollector
 from data.preprocessor import DataPreprocessor
 from models.lstm_model import LSTMPredictor
 from utils.logger import setup_logger
+from indicators.indicators import Indicators
 
 class TestLSTM:
     def __init__(self):
@@ -24,73 +25,69 @@ class TestLSTM:
         self.preprocessor = DataPreprocessor()
         
     def test_lstm_prediction(self):
-        """Prueba el modelo LSTM"""
         try:
             print("\nIniciando prueba de LSTM...")
             
-            # Obtener datos con timeframe más corto
+            # 1. Obtener datos
             symbol = "BTCUSDT"
-            timeframe = "30m"  # Cambiado de "1h" a "30m"
-            print(f"\nObteniendo datos para {symbol} en timeframe {timeframe}")
+            timeframe = "4h"
             df = self.collector.get_historical_data(symbol, timeframe)
+            df = df.tail(2000)
             
-            # Limitar a datos más recientes pero aumentar la cantidad por el nuevo timeframe
-            df = df.tail(4000)  # Duplicamos porque ahora tenemos el doble de registros por el timeframe
+            # Guardar los precios originales
+            df_prices = df['close'].copy()
             
-            # Preparar datos con ventana más corta
-            print("\nPreparando datos...")
-            X, y, scaler = self.preprocessor.prepare_data_for_lstm(df, look_back=20)  # Reducido de 30 a 20
+            # 2. Preparar datos
+            X, y, scaler = self.preprocessor.prepare_data_for_lstm(df, look_back=30)
+            print(f"\nShape de datos:")
+            print(f"X: {X.shape}")
+            print(f"y: {y.shape}")
             
-            # Ajustar proporción de datos de entrenamiento
-            train_size = int(len(X) * 0.7)  # Cambiado de 0.8 a 0.7
+            # 3. Split train/test
+            train_size = int(len(X) * 0.8)
             X_train, X_test = X[:train_size], X[train_size:]
             y_train, y_test = y[:train_size], y[train_size:]
             
-            print(f"\nDatos de entrenamiento: {len(X_train)} registros")
-            print(f"Datos de prueba: {len(X_test)} registros")
+            # 4. Entrenar modelo
+            lstm = LSTMPredictor((X_train.shape[1], X_train.shape[2]))
+            lstm.train(X_train, y_train)
             
-            # Obtener el número correcto de características
-            n_features = X.shape[2]  # Obtener automáticamente el número de características
-            input_shape = (60, n_features)
-            lstm = LSTMPredictor(input_shape)
-            
-            # Entrenar modelo
-            print("\nEntrenando modelo LSTM...")
-            lstm.train(X_train, y_train, epochs=100, batch_size=32)
-            
-            # Realizar predicciones
-            print("\nRealizando predicciones...")
+            # 5. Predecir
             predictions = lstm.predict(X_test)
             
-            # Convertir predicciones a precio real
-            predictions_reshaped = np.zeros((len(predictions), n_features))  # Usar n_features en lugar de 6
-            predictions_reshaped[:, 0] = predictions.flatten()  # Colocar predicciones en la primera columna
-            predictions = scaler.inverse_transform(predictions_reshaped)[:, 0]  # Obtener solo la columna del precio
+            # Crear DataFrame de resultados con precios reales
+            results = pd.DataFrame({
+                'Real': df_prices[-(len(y_test)):].values,  # Precios reales
+                'Predicción': predictions.flatten()  # Retornos predichos
+            })
             
-            # Preparar y_test para inverse_transform
-            y_test_reshaped = np.zeros((len(y_test), n_features))  # Usar n_features en lugar de 6
-            y_test_reshaped[:, 0] = y_test  # Colocar y_test en la primera columna
-            y_test_actual = scaler.inverse_transform(y_test_reshaped)[:, 0]  # Obtener solo la columna del precio
+            # Limpiar datos antes de calcular retornos
+            results = results.replace([np.inf, -np.inf], np.nan).dropna()
             
-            # Evaluar modelo
-            print("\nEvaluando modelo...")
-            mse = mean_squared_error(y_test_actual, predictions)
-            rmse = np.sqrt(mse)
-            mae = mean_absolute_error(y_test_actual, predictions)
+            # Calcular retornos reales
+            results['Returns'] = results['Real'].pct_change()
             
-            print("\n=== Métricas de Evaluación ===")
-            print(f"MSE: {mse:.6f}")
-            print(f"RMSE: {rmse:.6f}")
-            print(f"MAE: {mae:.6f}")
+            # 7. Visualizar
+            if len(results) > 1:
+                plt.figure(figsize=(15,7))
+                plt.plot(results.index, results['Returns'], label='Retornos Reales', alpha=0.5)
+                plt.plot(results.index, results['Predicción'], label='Retornos Predichos', alpha=0.5)
+                plt.title('LSTM: Predicción de Retornos')
+                plt.legend()
+                plt.savefig('tests/lstm_predictions.png')
+                plt.close()
+            else:
+                self.logger.warning("No hay suficientes datos para visualizar.")
             
-            # Visualizar resultados
-            self.plot_predictions(df['close'].values[-len(predictions):], predictions)
-            
-            print("\nPrueba completada exitosamente")
+            if len(results) > 1:
+                return self.evaluate_predictions(results)
+            else:
+                self.logger.warning("No hay suficientes datos para evaluar.")
+                return {}
             
         except Exception as e:
             self.logger.error(f"Error en prueba LSTM: {str(e)}")
-            print(traceback.format_exc())
+            raise
             
     def plot_predictions(self, actual: np.ndarray, predictions: np.ndarray):
         """Visualiza las predicciones vs valores reales"""
@@ -110,30 +107,62 @@ class TestLSTM:
             self.logger.error(f"Error en visualización: {str(e)}")
             raise
             
-    def evaluate_predictions(self, y_true: np.ndarray, predictions: np.ndarray):
-        """Evaluación detallada de predicciones"""
+    def evaluate_predictions(self, results: pd.DataFrame) -> dict:
+        """Evaluación detallada de predicciones de retornos"""
         try:
-            # Métricas básicas
-            mse = mean_squared_error(y_true, predictions)
-            rmse = np.sqrt(mse)
-            mae = mean_absolute_error(y_true, predictions)
+            # Limpiar datos
+            results = results.replace([np.inf, -np.inf], np.nan).dropna()
             
-            # Métricas direccionales
-            direction_true = np.sign(np.diff(y_true))
-            direction_pred = np.sign(np.diff(predictions.flatten()))
-            direction_accuracy = np.mean(direction_true == direction_pred)
+            if len(results) < 2:
+                self.logger.warning("No hay suficientes datos para evaluar.")
+                return {}
+            
+            # Métricas de error sobre retornos
+            mse = mean_squared_error(results['Returns'], results['Predicción'])
+            rmse = np.sqrt(mse)
+            mae = mean_absolute_error(results['Returns'], results['Predicción'])
+            
+            # Métricas de dirección
+            results['Real_Direction'] = np.sign(results['Returns'])
+            results['Pred_Direction'] = np.sign(results['Predicción'])
+            accuracy = np.mean(results['Real_Direction'] == results['Pred_Direction'])
+            
+            # Señales de trading
+            results['Signal'] = 0
+            results.loc[results['Predicción'] > 0.001, 'Signal'] = 1    # Long si predice subida >0.1%
+            results.loc[results['Predicción'] < -0.001, 'Signal'] = -1  # Short si predice bajada >0.1%
+            
+            # Retornos de la estrategia
+            results['Strategy_Returns'] = results['Returns'] * results['Signal'].shift(1)
+            
+            # Métricas de trading
+            win_rate = np.mean(results['Strategy_Returns'] > 0)
+            
+            # Sharpe Ratio anualizado
+            annual_factor = np.sqrt(252)
+            returns_mean = results['Strategy_Returns'].mean()
+            returns_std = results['Strategy_Returns'].std()
+            sharpe = annual_factor * (returns_mean / returns_std) if returns_std != 0 else 0
             
             print("\n=== Métricas de Evaluación ===")
-            print(f"MSE: {mse:.6f}")
-            print(f"RMSE: {rmse:.6f}")
-            print(f"MAE: {mae:.6f}")
-            print(f"Precisión Direccional: {direction_accuracy:.2%}")
+            print(f"MSE (Retornos): {mse:.6f}")
+            print(f"RMSE (Retornos): {rmse:.6f}")
+            print(f"MAE (Retornos): {mae:.6f}")
+            print(f"Precisión Direccional: {accuracy:.2%}")
+            print(f"Win Rate: {win_rate:.2%}")
+            print(f"Retorno Medio Diario: {returns_mean:.4%}")
+            print(f"Volatilidad Diaria: {returns_std:.4%}")
+            print(f"Sharpe Ratio: {sharpe:.4f}")
             
             return {
                 'mse': mse,
                 'rmse': rmse,
                 'mae': mae,
-                'direction_accuracy': direction_accuracy
+                'accuracy': accuracy,
+                'win_rate': win_rate,
+                'returns_mean': returns_mean,
+                'returns_std': returns_std,
+                'sharpe_ratio': sharpe
             }
             
         except Exception as e:
